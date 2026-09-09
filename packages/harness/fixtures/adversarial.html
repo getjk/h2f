@@ -1,0 +1,39 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Adversarial</title>
+<style>
+ :root{--b:#5b21b6;--a:#0ea5e9;--r:16px;--pad:20px}
+ *{box-sizing:border-box}
+ body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#18181b;background:#fafafa}
+ .sticky{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.92);border-bottom:1px solid #e4e4e7;padding:12px 24px;font-weight:600}
+ .wrap{padding:24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+ .tile{background:#fff;border:1px solid #e4e4e7;border-radius:var(--r);padding:var(--pad);box-shadow:0 4px 12px rgba(0,0,0,.10),0 1px 2px rgba(0,0,0,.06);overflow:hidden}
+ .tile h4{margin:0 0 8px;font-size:15px;letter-spacing:.01em}
+ .tile p{margin:0;font-size:13px;color:#52525b}
+ .grad{height:80px;border-radius:10px;background:linear-gradient(120deg,var(--b) 0%,#a855f7 45%,var(--a) 100%);margin-bottom:10px}
+ .radial{height:80px;border-radius:10px;background:radial-gradient(circle at 30% 30%,#fbbf24,#ef4444 70%);margin-bottom:10px}
+ .rot{transform:rotate(-6deg) scale(.95);background:#111;color:#fff;border-radius:8px;padding:10px;font-weight:600;text-align:center}
+ .clip{height:80px;background:linear-gradient(#22c55e,#065f46);clip-path:polygon(0 0,100% 12%,88% 100%,6% 84%)}
+ .scroll{height:90px;overflow:auto;border:1px dashed #d4d4d8;border-radius:8px;padding:8px;font-size:12px}
+ .ellipse{border-radius:50% 20% / 30% 60%;height:70px;background:#0ea5e9}
+ .inset{height:70px;border-radius:10px;background:#f4f4f5;box-shadow:inset 0 3px 8px rgba(0,0,0,.25)}
+ .deco{text-decoration:underline wavy #ef4444;text-underline-offset:3px}
+ .up{text-transform:uppercase;letter-spacing:.14em;font-size:11px;color:#71717a}
+ img{display:block;width:100%;height:80px;object-fit:cover;border-radius:8px;margin-bottom:10px}
+ .pseudo::before{content:"NEW";background:var(--b);color:#fff;font-size:10px;padding:2px 6px;border-radius:99px;margin-right:6px}
+ .col{column-count:2;column-gap:14px;font-size:12px}
+ svg{display:block}
+</style>
+<div class=sticky>Adversarial fixture — sticky header</div>
+<div class=wrap>
+ <div class=tile><div class=grad></div><h4>Linear gradient</h4><p>Three stops at 120 degrees.</p></div>
+ <div class=tile><div class=radial></div><h4>Radial gradient</h4><p>Off-centre circle.</p></div>
+ <div class=tile><img src=img.webp alt=""><h4>WebP image</h4><p>object-fit cover.</p></div>
+ <div class=tile><img src=img.avif alt=""><h4>AVIF image</h4><p>object-fit cover.</p></div>
+ <div class=tile><div class=clip></div><h4>clip-path polygon</h4><p>Four-point shape.</p></div>
+ <div class=tile><div class=ellipse></div><h4>Elliptical radii</h4><p>Two-value radius syntax.</p></div>
+ <div class=tile><div class=inset></div><h4>Inset shadow</h4><p>Spread and blur inward.</p></div>
+ <div class=tile><div class=rot>Rotated</div><h4>2D transform</h4><p>Rotate plus scale.</p></div>
+ <div class=tile><svg width=100% height=80 viewBox="0 0 200 80"><defs><linearGradient id=g><stop offset=0 stop-color="#5b21b6"/><stop offset=1 stop-color="#0ea5e9"/></linearGradient></defs><rect width=200 height=80 rx=10 fill="url(#g)"/><circle cx=40 cy=40 r=22 fill="#fff" opacity=.85/><path d="M90 55 L120 20 L150 55 Z" fill="#fde047"/></svg><h4>Inline SVG</h4><p>Gradient, circle, path.</p></div>
+ <div class=tile><h4 class=deco>Wavy underline</h4><p class=up>Uppercase tracked label</p><p class=pseudo>Pseudo-element badge</p></div>
+ <div class=tile><div class=scroll>Scrollable overflow with enough copy that it clips. Line two. Line three. Line four. Line five. Line six. Line seven.</div><h4>Overflow clip</h4></div>
+ <div class=tile><div class=col>Multi-column text flows across two columns and needs line-box extraction to keep up with the fragmentation.</div><h4>Columns</h4></div>
+</div>

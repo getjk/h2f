@@ -1,0 +1,22 @@
+<!doctype html><meta charset=utf-8><title>Fixture</title>
+<style>
+ :root{--brand-500:#5b21b6;--surface:#f7f7fb;--radius:14px;--space-4:16px}
+ *{box-sizing:border-box} body{margin:0;font:16px/1.5 system-ui,sans-serif;background:var(--surface);color:#18181b}
+ .page{max-width:960px;margin:0 auto;padding:48px var(--space-4)}
+ h1{font-size:44px;line-height:1.1;letter-spacing:-.02em;margin:0 0 12px}
+ .lede{font-size:19px;max-width:52ch;margin:0 0 32px}
+ .grid{display:flex;gap:20px;flex-wrap:wrap}
+ .card{flex:1 1 260px;background:#fff;border:1px solid #e4e4e7;border-radius:var(--radius);padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+ .card__title{font-size:18px;font-weight:650;margin:0 0 6px}
+ .card__body{margin:0;color:#52525b;font-size:15px}
+ .btn{display:inline-block;margin-top:16px;background:var(--brand-500);color:#fff;padding:10px 18px;border-radius:999px;font-weight:600;text-decoration:none}
+ .hero{background:linear-gradient(135deg,#5b21b6,#0ea5e9);border-radius:24px;padding:40px;color:#fff;margin-bottom:40px}
+</style>
+<div class=page>
+ <div class=hero><h1>Rendered fidelity, fully editable</h1><p class=lede style="color:#e9d5ff">A long enough sentence that it wraps onto several lines so that line-box extraction has something real to chew on.</p></div>
+ <div class=grid>
+  <div class=card><h3 class=card__title>Oracle</h3><p class=card__body>Chrome renders each element alone on transparency.</p><a class=btn href=#>Learn more</a></div>
+  <div class=card><h3 class=card__title>Ladder</h3><p class=card__body>Try the most editable candidate, step down only on failure.</p><a class=btn href=#>Learn more</a></div>
+  <div class=card><h3 class=card__title>Calibration</h3><p class=card__body>Fit the CSS to Figma transfer functions from data.</p><a class=btn href=#>Learn more</a></div>
+ </div>
+</div>

@@ -1,0 +1,57 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Hazards</title>
+<style>
+ *{box-sizing:border-box} body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#18181b;background:#fff}
+ .top{position:sticky;top:0;z-index:5;background:#111;color:#fff;padding:12px 20px;font-weight:600}
+ section{padding:24px 20px;border-bottom:1px solid #eee}
+ h2{font-size:17px;margin:0 0 10px}
+ img,video{display:block;width:280px;height:160px;object-fit:cover;border-radius:10px;background:#f4f4f5}
+ .reveal{opacity:0;transform:translateY(24px);transition:opacity .4s,transform .4s}
+ .reveal.in{opacity:1;transform:none}
+ @keyframes spin{to{transform:rotate(360deg)}}
+ @keyframes fadeup{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+ .spin{width:56px;height:56px;border-radius:12px;background:linear-gradient(#f43f5e,#f59e0b);animation:spin 2s linear infinite}
+ .once{animation:fadeup .5s ease forwards;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:10px;padding:12px;max-width:420px}
+ /* consent bar */
+ #cookie{position:fixed;inset:auto 0 0 0;z-index:99;background:#18181b;color:#fff;padding:16px 20px;display:flex;gap:12px;align-items:center;justify-content:space-between}
+ #cookie button{background:#22c55e;border:0;color:#062;font-weight:700;padding:8px 16px;border-radius:8px;cursor:pointer}
+ /* newsletter modal, appears after consent */
+ #news{position:fixed;inset:0;z-index:98;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center}
+ #news .box{background:#fff;border-radius:14px;padding:24px;width:340px;position:relative}
+ #news .x{position:absolute;top:8px;right:10px;border:0;background:none;font-size:18px;cursor:pointer}
+</style>
+<div class=top>Hazards fixture — sticky header</div>
+<section><h2>Looping animation</h2><div class=spin></div></section>
+<section><h2>One-shot reveal animation</h2><div class=once>This should land in its finished state.</div></section>
+<section><h2>Video with poster</h2><video poster="img.png" src="missing.mp4" autoplay loop muted playsinline></video></section>
+<section><h2>Eager image</h2><img src="img.webp" alt=""></section>
+<section><h2>Base reveal</h2><div class=reveal>Revealed by IntersectionObserver at the top level.</div></section>
+<section style="height:700px"><h2>Filler</h2><p>Tall enough that the page actually scrolls.</p></section>
+<div id=more></div>
+<div id=cookie><span>We use cookies to make this page worse.</span><span><button id=acc>Accept all</button></span></div>
+<div id=news><div class=box><button class=x aria-label=Close>&times;</button><h2>Join our newsletter</h2><p>Definitely not now.</p></div></div>
+<script>
+ // consent -> newsletter modal, the classic two-step
+ document.getElementById('acc').onclick = () => {
+   document.getElementById('cookie').remove();
+   setTimeout(() => document.getElementById('news').style.display = 'flex', 250);
+ };
+ document.querySelector('#news .x').onclick = () => document.getElementById('news').remove();
+
+ // lazy sections that only exist once you scroll near the bottom
+ let added = 0;
+ const grow = () => {
+   if (added >= 3) return;
+   added++;
+   const s = document.createElement('section');
+   s.innerHTML = '<h2>Appended on scroll #' + added + '</h2>'
+     + '<img loading=lazy src="img.avif" alt="">'
+     + '<div class=reveal>Revealed by IntersectionObserver.</div>';
+   document.getElementById('more').append(s);
+   io.observe(s.querySelector('.reveal'));
+ };
+ const io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && e.target.classList.add('in')), { threshold: .1 });
+ addEventListener('scroll', () => {
+   if (innerHeight + scrollY > document.body.scrollHeight - 200) grow();
+ }, { passive: true });
+ document.querySelectorAll('.reveal').forEach(e => io.observe(e));
+</script>

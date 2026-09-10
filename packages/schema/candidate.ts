@@ -1,9 +1,13 @@
 /** What we propose to build in Figma, in Figma's own vocabulary. */
 import type { Rect, TextLine } from './ir.js';
 
+export type Stop = { pos: number; color: string };
+
 export type Fill =
   | { type: 'SOLID'; color: string }
-  | { type: 'GRADIENT_LINEAR'; angle: number; stops: { pos: number; color: string }[] }
+  | { type: 'GRADIENT_LINEAR'; angle: number; stops: Stop[] }
+  | { type: 'GRADIENT_RADIAL'; cx: number; cy: number; rx: number; ry: number; stops: Stop[] }
+  | { type: 'GRADIENT_ANGULAR'; cx: number; cy: number; from: number; stops: Stop[] }
   | { type: 'IMAGE'; src: string; fit: string }
   | { type: 'RASTER'; tile: string };            // bottom rung: the oracle tile itself
 
@@ -31,6 +35,9 @@ export type CandidateNode = {
   opacity: number;
   clip: boolean;
   text?: TextRun[];
+  /** Pure 2D rotation in degrees. Figma holds this natively; anything else rasters. */
+  rotation?: number;
+  svg?: string;
   rung: Rung;
   reason?: string;
   score?: number;                                // mean deltaE against this node's oracle tile

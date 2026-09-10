@@ -78,17 +78,31 @@ bin/{capture,verify,gate}.ts CLI.
    it paints, not whether it takes clicks: an invisible `pointer-events:none` wrapper is
    not a blocker, but a translucent scrim with `pointer-events:none` still is.
 
+## Per-node scores are a tail, not a mean
+
+`ownScores` reports the **95th percentile** of per-pixel ΔE over a node's own pixels, not
+the mean. Text rendered in the wrong place has the right ink in the wrong pixels: its mean
+barely moves while its worst pixels move a lot. Under a mean, the columns card in
+`adversarial.html` — visibly reflowed into one wide block instead of two columns — scored
+3.6, indistinguishable from correct antialiased text, and was promoted back to vector. On
+the tail it scores 21.7 and is demoted correctly.
+
+## Demote only when demoting helps
+
+A node is stepped down only if the raster version actually scores meaningfully better
+(`H2F_MIN_GAIN`). A text-dense node sits above a flat one purely from antialiasing, and so
+does its tile — demoting it there buys nothing and costs an editable layer.
+
 ## Two thresholds, on purpose
 
-`H2F_RUNG_THRESHOLD` (2.0) demotes a vector node. `H2F_BROKEN_TILE` (12) is the alarm
-that a *tile itself* is wrong. They are far apart because the evidence says they should
-be: the SVG-isolation bug produced a tile scoring **38**, while a perfectly correct tile
-carrying antialiased text scores **~3**. One threshold for both hides real breakage
-behind a crowd of false alarms.
+`H2F_RUNG_THRESHOLD` (8) demotes a vector node. `H2F_BROKEN_TILE` (30) is the alarm that a
+*tile itself* is wrong. They are far apart on purpose: correct antialiased text reaches ~7,
+visibly wrong text reflow ~22, and a genuinely blank tile 38+. One threshold for both hides
+real breakage behind a crowd of false alarms.
 
-Related: rung decisions are made on a slightly blurred diff, because glyph antialiasing
-puts a text-dense region several ΔE above a flat one while looking identical. Fidelity
-— the number we are judged on — stays the raw diff.
+Rung decisions are made on a slightly blurred diff, since glyph antialiasing separates
+text-dense regions from flat ones while looking identical. Fidelity — the number we are
+judged on — stays the raw diff.
 
 ## Known gaps in the fit loop (M1)
 
@@ -96,13 +110,15 @@ puts a text-dense region several ΔE above a flat one while looking identical. F
   lands outside a node's rect (shadows, transforms) is attributed to whatever it overlaps.
   The symmetric fix is to capture emulated tiles with the same isolation and packing the
   oracle uses, and compare tile to tile.
-- The emulator ignores `transform`; such nodes are forced to raster rather than placed,
-  though Figma has `rotation` and could hold them.
-- The planner only parses `linear-gradient`. Figma has `GRADIENT_RADIAL` and
-  `GRADIENT_ANGULAR`; radial and conic gradients raster today for no good reason.
-- The emulator cannot render SVG, so SVG nodes raster — but Figma has
-  `createNodeFromSvg`. **Wherever the emulator's vocabulary is narrower than Figma's, we
-  silently lose editability we could have had.** Keep the two in step.
+- Rotation: a rotated element's captured rect is its *transformed* bounding box, so the
+  emulator recovers the pre-rotation box (`W = w|cos| + h|sin|`, `H = w|sin| + h|cos|`)
+  before rotating. Near 45° that system is singular and the node rasters. A raster tile is
+  never rotated — it already contains the rotation.
+- Still unexpressed: `clip-path` (Figma has vector paths and could hold it),
+  `repeating-*` gradients, colour hints, and CSS columns (line rects are captured but the
+  emulator lays them out wrong).
+- **Wherever the emulator's vocabulary is narrower than Figma's, we silently lose
+  editability we could have had.** Keep the two in step — that is what this branch was.
 
 ## Status
 

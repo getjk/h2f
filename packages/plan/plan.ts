@@ -25,6 +25,54 @@ export function parseShadows(css: string): Effect[] {
   return out;
 }
 
+/**
+ * A stop that is literally `transparent` must keep its neighbour's hue, or the ramp runs
+ * through transparent black and leaves a grey band. See docs/MAPPING.md.
+ */
+function parseStops(parts: string[]) {
+  const stops = parts.map((p, i) => {
+    const pos = /([\d.]+)%\s*$/.exec(p);
+    const color = p.replace(/\s*[\d.]+%\s*$/, '').trim();
+    return { pos: pos ? +pos[1] / 100 : i / Math.max(1, parts.length - 1), color };
+  });
+  stops.forEach((st, i) => {
+    if (!/^transparent$/i.test(st.color)) return;
+    const hue = stops[i - 1]?.color ?? stops[i + 1]?.color ?? 'rgb(0,0,0)';
+    const rgb = /rgba?\(([^)]+)\)/.exec(hue);
+    st.color = rgb ? `rgba(${rgb[1].split(',').slice(0, 3).join(',')}, 0)` : 'rgba(0,0,0,0)';
+  });
+  return stops;
+}
+
+/** `radial-gradient(circle at 30% 30%, #a, #b 70%)`. CSS defaults to farthest-corner. */
+export function parseRadialGradient(css: string, w: number, h: number): Fill | null {
+  const m = /^radial-gradient\((.*)\)$/s.exec(css.trim());
+  if (!m) return null;
+  const parts = m[1].split(/,(?![^(]*\))/).map(s => s.trim());
+  let cx = 0.5, cy = 0.5, circle = false, size = 'farthest-corner';
+  if (/^(circle|ellipse|closest|farthest|at |[\d.]+(px|%))/.test(parts[0])) {
+    const head = parts.shift()!;
+    circle = /\bcircle\b/.test(head);
+    const sz = /(closest|farthest)-(side|corner)/.exec(head);
+    if (sz) size = sz[0];
+    const at = /at\s+([^,]+)$/.exec(head);
+    if (at) {
+      const [px_, py_] = at[1].trim().split(/\s+/);
+      const rel = (v: string, ext: number) => /%$/.test(v) ? parseFloat(v) / 100
+        : /^(left|top)$/.test(v) ? 0 : /^(right|bottom)$/.test(v) ? 1 : /^center$/.test(v) ? 0.5
+        : parseFloat(v) / ext;
+      cx = rel(px_, w); cy = rel(py_ ?? px_, h);
+    }
+  }
+  // farthest-corner: the radius reaches the corner furthest from the centre
+  const dx = Math.max(cx, 1 - cx) * w, dy = Math.max(cy, 1 - cy) * h;
+  const near = /closest/.test(size);
+  const [ex, ey] = near ? [Math.min(cx, 1 - cx) * w, Math.min(cy, 1 - cy) * h] : [dx, dy];
+  const r = /corner/.test(size) ? Math.hypot(ex, ey) : Math.min(ex, ey);
+  const rx = circle ? r / w : ex / w, ry = circle ? r / h : ey / h;
+  return { type: 'GRADIENT_RADIAL', cx, cy, rx, ry, stops: parseStops(parts) };
+}
+
 /** `linear-gradient(135deg, #a 0%, #b 100%)` -> Figma-shaped stops. Anything else: null. */
 export function parseLinearGradient(css: string): Fill | null {
   const m = /^linear-gradient\((.*)\)$/s.exec(css.trim());
@@ -38,20 +86,7 @@ export function parseLinearGradient(css: string): Fill | null {
       : /bottom/.test(to) ? (/left/.test(to) ? 225 : /right/.test(to) ? 135 : 180)
       : /left/.test(to) ? 270 : 90;
   }
-  const stops = parts.map((p, i) => {
-    const pos = /([\d.]+)%\s*$/.exec(p);
-    const color = p.replace(/\s*[\d.]+%\s*$/, '').trim();
-    return { pos: pos ? +pos[1] / 100 : i / Math.max(1, parts.length - 1), color };
-  });
-  // A stop that is literally `transparent` must keep its neighbour's hue, or the ramp
-  // runs through transparent black and leaves a grey band. See docs/MAPPING.md.
-  stops.forEach((s, i) => {
-    if (!/^transparent$/i.test(s.color)) return;
-    const hue = stops[i - 1]?.color ?? stops[i + 1]?.color ?? 'rgb(0,0,0)';
-    const rgb = /rgba?\(([^)]+)\)/.exec(hue);
-    s.color = rgb ? `rgba(${rgb[1].split(',').slice(0, 3).join(',')}, 0)` : 'rgba(0,0,0,0)';
-  });
-  return { type: 'GRADIENT_LINEAR', angle, stops };
+  return { type: 'GRADIENT_LINEAR', angle, stops: parseStops(parts) };
 }
 
 function fillsOf(n: ElementNode): Fill[] {
@@ -59,7 +94,7 @@ function fillsOf(n: ElementNode): Fill[] {
   if (!transparent(st['background-color'])) out.push({ type: 'SOLID', color: st['background-color'] });
   const bg = st['background-image'];
   if (bg && bg !== 'none') {
-    const g = parseLinearGradient(bg);
+    const g = parseLinearGradient(bg) ?? parseRadialGradient(bg, n.rect.w, n.rect.h);
     if (g) out.push(g);
     else if (/^url\(/.test(bg)) out.push({ type: 'IMAGE', src: bg.slice(5, -2), fit: 'cover' });
   }
@@ -72,6 +107,21 @@ function strokeOf(st: Style): Stroke | undefined {
   const [top, right, bottom, left] = ['top', 'right', 'bottom', 'left'].map(w);
   if (!(top || right || bottom || left)) return;
   return { top, right, bottom, left, color: st['border-top-color'] };
+}
+
+/**
+ * Figma holds rotation on every node, so a pure rotate (optionally uniform-scaled) can
+ * stay vector. A matrix that skews or scales non-uniformly cannot, and rasters.
+ */
+export function pureRotation(t: string): number | undefined {
+  if (!t || t === 'none') return;
+  const m = /^matrix\(([^)]+)\)$/.exec(t);
+  if (!m) return;
+  const [a, b, c, d] = m[1].split(',').map(Number);
+  const sx = Math.hypot(a, b), sy = Math.hypot(c, d);
+  if (Math.abs(sx - sy) > 1e-3) return;                      // non-uniform scale
+  if (Math.abs(a / sx - d / sy) > 1e-3) return;              // skew
+  return Math.atan2(b, a) * 180 / Math.PI;
 }
 
 function textOf(n: ElementNode): TextRun[] | undefined {
@@ -99,14 +149,15 @@ export function plan(ir: StructureIR, tiles: Record<number, string>): CandidateI
       opacity: num(st.opacity) || 1,
       clip: st['overflow-x'] !== 'visible' || st['overflow-y'] !== 'visible',
       text: textOf(n),
+      rotation: pureRotation(st.transform),
+      svg: n.svg,
       rung: 'vector',
     };
     // Things we know we cannot express, before the emulator even looks.
-    const unsupported = n.svg ? 'svg'
-      : st['background-image'] !== 'none' && !c.fills.some(f => f.type !== 'SOLID') ? 'background-image'
+    const unsupported = st['background-image'] !== 'none' && !c.fills.some(f => f.type !== 'SOLID') ? 'background-image'
       : st.filter !== 'none' ? 'filter'
       : st['clip-path'] !== 'none' ? 'clip-path'
-      : st.transform !== 'none' ? 'transform'
+      : st.transform !== 'none' && c.rotation === undefined ? 'transform'
       : null;
     if (unsupported && tiles[n.id]) {
       // The tile already contains this element's own text -- leaving c.text set draws it

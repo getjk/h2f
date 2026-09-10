@@ -13,11 +13,16 @@ import type { StructureIR, Oracle } from '../packages/schema/ir.js';
 import type { CandidateIR } from '../packages/schema/candidate.js';
 
 const dir = process.argv[2] ?? 'out/L';
-const threshold = +(process.env.H2F_RUNG_THRESHOLD ?? 2.0);   // demote a vector node above this
+// Scores are the 95th percentile of per-pixel deltaE over a node's own pixels, so these
+// sit well above what a mean would need. Correct text antialiasing reaches ~7; visibly
+// wrong text reflow reaches ~22.
+const threshold = +(process.env.H2F_RUNG_THRESHOLD ?? 8);      // demote a vector node above this
 // A tile that is actually broken scores an order of magnitude worse than one that merely
 // carries antialiased text: the SVG-isolation bug scored 38, a correct text tile ~3. So
 // the "this tile is wrong" alarm sits well above the demotion threshold on purpose.
-const brokenTile = +(process.env.H2F_BROKEN_TILE ?? 12);
+const brokenTile = +(process.env.H2F_BROKEN_TILE ?? 30);      // a tile that is itself wrong
+// How much a demotion must actually improve the node before it is worth the editability.
+const gain = +(process.env.H2F_MIN_GAIN ?? 2.0);
 
 const ir: StructureIR = JSON.parse(readFileSync(join(dir, 'structure.json'), 'utf8'));
 const oracle: Oracle = JSON.parse(readFileSync(join(dir, 'oracle.json'), 'utf8'));
@@ -66,12 +71,17 @@ function ownScores(cand: CandidateIR, field: Float32Array, W: number, H: number,
   for (const n of cand.nodes) {
     const [x0, y0, x1, y1] = box(n.rect);
     const holes = (kids.get(n.id) ?? []).map(k => box(k.rect));
-    let sum = 0, count = 0;
+    // The tail, not the mean. Text in the wrong place has the right ink in the wrong
+    // pixels, so its mean barely moves while its worst pixels move a lot -- a mean would
+    // rate reflowed text the same as correctly rendered text.
+    const vals: number[] = [];
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
       if (holes.some(([hx0, hy0, hx1, hy1]) => x >= hx0 && x < hx1 && y >= hy0 && y < hy1)) continue;
-      sum += field[y * W + x]; count++;
+      vals.push(field[y * W + x]);
     }
-    out[n.id] = count ? +(sum / count).toFixed(3) : 0;
+    if (!vals.length) { out[n.id] = 0; continue }
+    vals.sort((a, b) => a - b);
+    out[n.id] = +vals[Math.floor(vals.length * 0.95)].toFixed(3);
   }
   return out;
 }
@@ -99,10 +109,20 @@ async function measure(png: Buffer) {
 
 let { fidelity: m, scores } = await measure(await shoot(cand, join(dir, 'emulated.png')));
 
-// Demote whatever missed, then re-render once. Most nodes never move.
+// Demote whatever missed, then re-render and check whether it actually helped.
 const missed = cand.nodes.filter(n => n.rung === 'vector' && (scores[n.id] ?? 0) > threshold && tiles[n.id]);
+const before = new Map(missed.map(n => [n.id, { score: scores[n.id], fills: n.fills, text: n.text }]));
 for (const n of missed) { n.rung = 'raster'; n.reason = `deltaE ${scores[n.id]}`; n.fills = [{ type: 'RASTER', tile: tiles[n.id] }]; n.text = undefined }
 if (missed.length) ({ fidelity: m, scores } = await measure(await shoot(cand, join(dir, 'emulated.png'))));
+
+/**
+ * Step down only if stepping down helps. A text-dense node sits a few deltaE above a flat
+ * one purely from glyph antialiasing, and its raster tile sits there too -- so demoting it
+ * buys nothing and costs an editable layer. Promote those back.
+ */
+const restored = missed.filter(n => (scores[n.id] ?? 0) >= (before.get(n.id)!.score ?? 0) - gain);
+for (const n of restored) { const b = before.get(n.id)!; n.rung = 'vector'; n.reason = undefined; n.fills = b.fills; n.text = b.text }
+if (restored.length) ({ fidelity: m, scores } = await measure(await shoot(cand, join(dir, 'emulated.png'))));
 
 for (const n of cand.nodes) n.score = scores[n.id];
 writeFileSync(join(dir, 'candidate.json'), JSON.stringify(cand));
@@ -110,7 +130,7 @@ writeFileSync(join(dir, 'candidate.json'), JSON.stringify(cand));
 const by = (r: string) => cand.nodes.filter(n => n.rung === r).length;
 console.log(`${dir}  ${cand.nodes.length} nodes`);
 console.log(`  page   meanΔE ${m.meanDeltaE}   p95ΔE ${m.p95DeltaE}   SSIM ${m.ssim}`);
-console.log(`  rungs  vector ${by('vector')}  raster ${by('raster')}   (demoted ${missed.length} this pass)`);
+console.log(`  rungs  vector ${by('vector')}  raster ${by('raster')}   (demoted ${missed.length}, ${restored.length} kept vector because raster did not help)`);
 // Worst nodes at ANY rung. A raster node scoring badly means its tile is wrong, which
 // is the loudest signal there is -- and it was invisible while this only listed vectors.
 const worst = [...cand.nodes].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 5);

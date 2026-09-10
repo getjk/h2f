@@ -8,8 +8,10 @@ transparency), and grade everything built later against those tiles, element by
 element. Compositing all tiles in paint order reproduces the page — that recomposition
 is the self-test, and it is how every bug so far was found.
 
-Read `README.md` for the architecture and `TESTING.md` for how to run things.
-The design rationale is in the v4 brief (ask Joseph if you do not have it).
+Read in this order: `docs/BRIEF.md` for why the project is shaped this way (the
+editability ladder, the oracle, what was rejected and why), `docs/ARCHITECTURE.md` for
+how the shipped extension/server/plugin fit together, `README.md` for what exists today,
+`TESTING.md` for how to run it.
 
 ## The rule
 

@@ -108,7 +108,12 @@ export function plan(ir: StructureIR, tiles: Record<number, string>): CandidateI
       : st['clip-path'] !== 'none' ? 'clip-path'
       : st.transform !== 'none' ? 'transform'
       : null;
-    if (unsupported && tiles[n.id]) { c.rung = 'raster'; c.reason = unsupported; c.fills = [{ type: 'RASTER', tile: tiles[n.id] }] }
+    if (unsupported && tiles[n.id]) {
+      // The tile already contains this element's own text -- leaving c.text set draws it
+      // twice, which reads as a uniform few-ΔE haze rather than an obvious failure.
+      c.rung = 'raster'; c.reason = unsupported; c.text = undefined;
+      c.fills = [{ type: 'RASTER', tile: tiles[n.id] }];
+    }
     return c;
   });
   const body = ir.nodes.find(n => n.tag === 'body');

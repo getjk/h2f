@@ -78,20 +78,31 @@ bin/{capture,verify,gate}.ts CLI.
    it paints, not whether it takes clicks: an invisible `pointer-events:none` wrapper is
    not a blocker, but a translucent scrim with `pointer-events:none` still is.
 
+## Two thresholds, on purpose
+
+`H2F_RUNG_THRESHOLD` (2.0) demotes a vector node. `H2F_BROKEN_TILE` (12) is the alarm
+that a *tile itself* is wrong. They are far apart because the evidence says they should
+be: the SVG-isolation bug produced a tile scoring **38**, while a perfectly correct tile
+carrying antialiased text scores **~3**. One threshold for both hides real breakage
+behind a crowd of false alarms.
+
+Related: rung decisions are made on a slightly blurred diff, because glyph antialiasing
+puts a text-dense region several ΔE above a flat one while looking identical. Fidelity
+— the number we are judged on — stays the raw diff.
+
 ## Known gaps in the fit loop (M1)
 
-- **A node dropped from the plan is invisible to per-node scoring.** `plan()` filters on
-  `paints`, and `ownScores` only punches holes for children that are *in the plan*. So an
-  element the planner skipped renders as nothing, is never scored, and its error lands
-  diffusely in an ancestor instead of naming itself. The inline-SVG card in
-  `adversarial.html` is the live example: visibly missing from the emulated render, yet
-  scoring 0.903. The page score catches it; attribution does not. Fix by scoring every
-  captured node with a tile, whether or not the plan kept it.
 - Per-node scores come from the page diff rather than isolated renders, so paint that
   lands outside a node's rect (shadows, transforms) is attributed to whatever it overlaps.
   The symmetric fix is to capture emulated tiles with the same isolation and packing the
   oracle uses, and compare tile to tile.
-- The emulator ignores `transform`; such nodes are forced to raster rather than placed.
+- The emulator ignores `transform`; such nodes are forced to raster rather than placed,
+  though Figma has `rotation` and could hold them.
+- The planner only parses `linear-gradient`. Figma has `GRADIENT_RADIAL` and
+  `GRADIENT_ANGULAR`; radial and conic gradients raster today for no good reason.
+- The emulator cannot render SVG, so SVG nodes raster — but Figma has
+  `createNodeFromSvg`. **Wherever the emulator's vocabulary is narrower than Figma's, we
+  silently lose editability we could have had.** Keep the two in step.
 
 ## Status
 

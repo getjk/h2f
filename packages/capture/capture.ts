@@ -25,8 +25,10 @@ const PINNED = `html.h2f-nopin [data-h2f-pin]{visibility:hidden!important}`;
 const ISOLATE = `*{visibility:hidden!important}`
   + `html:not([data-h2f]),body:not([data-h2f]){background:none!important}`
   + `[data-h2f]{visibility:visible!important}[data-h2f] *{visibility:hidden!important}`
-  // an <svg> is a leaf to us, so its internals belong to its own paint
-  + `[data-h2f] svg,[data-h2f] svg *{visibility:visible!important}`;
+  // An <svg> is a leaf to us, so its internals belong to its own paint. Both cases
+  // matter: an svg inside the target, and the svg that IS the target -- the second is
+  // the common one, and matching only the first yields a blank tile.
+  + `[data-h2f] svg,[data-h2f] svg *,svg[data-h2f] *{visibility:visible!important}`;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;

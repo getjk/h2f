@@ -86,5 +86,5 @@ export async function compare(a: Buffer | string, b: Buffer | string, grid = 16)
     }
   }
 
-  return { width: W, height: H, meanDeltaE: +mean.toFixed(3), p95DeltaE: +p95.toFixed(3), ssim: wins ? +(ssimSum / wins).toFixed(4) : 1, heat };
+  return { width: W, height: H, meanDeltaE: +mean.toFixed(3), p95DeltaE: +p95.toFixed(3), ssim: wins ? +(ssimSum / wins).toFixed(4) : 1, heat, field: des };
 }

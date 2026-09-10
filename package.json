@@ -6,7 +6,8 @@
     "capture": "tsx bin/capture.ts",
     "setup": "playwright install chromium",
     "gate": "tsx bin/gate.ts",
-    "verify": "tsx bin/verify.ts"
+    "verify": "tsx bin/verify.ts",
+    "fit": "tsx bin/fit.ts"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",

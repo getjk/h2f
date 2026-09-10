@@ -78,6 +78,21 @@ bin/{capture,verify,gate}.ts CLI.
    it paints, not whether it takes clicks: an invisible `pointer-events:none` wrapper is
    not a blocker, but a translucent scrim with `pointer-events:none` still is.
 
+## Known gaps in the fit loop (M1)
+
+- **A node dropped from the plan is invisible to per-node scoring.** `plan()` filters on
+  `paints`, and `ownScores` only punches holes for children that are *in the plan*. So an
+  element the planner skipped renders as nothing, is never scored, and its error lands
+  diffusely in an ancestor instead of naming itself. The inline-SVG card in
+  `adversarial.html` is the live example: visibly missing from the emulated render, yet
+  scoring 0.903. The page score catches it; attribution does not. Fix by scoring every
+  captured node with a tile, whether or not the plan kept it.
+- Per-node scores come from the page diff rather than isolated renders, so paint that
+  lands outside a node's rect (shadows, transforms) is attributed to whatever it overlaps.
+  The symmetric fix is to capture emulated tiles with the same isolation and packing the
+  oracle uses, and compare tile to tile.
+- The emulator ignores `transform`; such nodes are forced to raster rather than placed.
+
 ## Status
 
 M0 is done and validated on fixtures at all three sizes. IKEA now passes on real hardware

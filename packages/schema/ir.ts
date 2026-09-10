@@ -20,6 +20,8 @@ export type ElementNode = {
   image?: { src: string; natural: { w: number; h: number }; fit: string; position: string };
   svg?: string;
   paintOrder: number;
+  /** Does this element put any pixels on screen? Layout-only wrappers do not, and need no tile. */
+  paints: boolean;
   /** Set when the element cannot be pixel-isolated (blend/backdrop/ancestor-clip). */
   noIsolate?: string;
   /** Structural fingerprint: tag+class skeleton, ignoring text and src. */
@@ -40,6 +42,8 @@ export type StructureIR = {
     dismissed: string[];                                          // banners and dialogs clicked away
     blockers: { tag: string; cls: string; area: number }[];        // overlays still covering the page
     videos: { src: string; poster: string; w: number; h: number }[];
+    truncated: 'time' | 'height' | null;     // infinite feed: we stopped early, and say so
+    failed?: string;                         // preparation itself died; capture went ahead anyway
   };
   page: { w: number; h: number };
   nodes: ElementNode[];
@@ -52,4 +56,7 @@ export type Oracle = {
   size: CaptureSize;
   full: string;                       // full-page reference png
   tiles: Record<number, string>;      // node id -> png path (transparent, DPR-scaled)
+  skipped: number;                    // painting nodes over the tile cap
+  offscreenX: number;                 // painting nodes right of the viewport: unreachable, never tiled
+  overflowX: number;                  // css px the page extends past the layout viewport
 };

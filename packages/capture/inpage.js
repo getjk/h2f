@@ -24,26 +24,44 @@ function tokens() {
 
 // --- cascade: which declarations actually used a var(), per element ---
 // One querySelectorAll per rule, not one rule-scan per element, so this stays cheap.
-function varBindings() {
+function varBindings(budgetMs = 3000) {
   // Chrome expands shorthands in the CSSOM and drops the var() from the longhands,
   // so read the authored declaration text instead.
   const DECL = /([-\w]+)\s*:\s*([^;{}]*var\(\s*(--[\w-]+)[^;{}]*)/g;
   const parse = text => { const out = {}; let m; DECL.lastIndex = 0; while ((m = DECL.exec(text))) out[m[1]] = m[3]; return out };
 
-  const map = new Map();
   const rules = [];
   for (const sheet of document.styleSheets) {
     let rs; try { rs = sheet.cssRules } catch { continue }
     (function walk(list) { for (const r of list) { if (r.selectorText && r.style) rules.push(r); if (r.cssRules) walk(r.cssRules) } })(rs || []);
   }
-  const add = (el, uses) => { if (Object.keys(uses).length) map.set(el, Object.assign(map.get(el) || {}, uses)) };
-  for (const r of rules) {                                        // source order approximates the cascade
+
+  // One querySelectorAll per *distinct set of bindings*, not per rule: a design system
+  // declares `color: var(--fg)` in dozens of rules, and they can all be queried at once.
+  const groups = new Map();
+  for (const r of rules) {
     const uses = parse(r.cssText.slice(r.cssText.indexOf('{')));
     if (!Object.keys(uses).length) continue;
-    let els; try { els = document.querySelectorAll(r.selectorText) } catch { continue }
-    for (const el of els) add(el, uses);
+    const key = JSON.stringify(uses);
+    (groups.get(key) ?? groups.set(key, { uses, sel: [] }).get(key)).sel.push(r.selectorText);
   }
-  for (const el of document.querySelectorAll('[style]')) add(el, parse(el.getAttribute('style')));
+
+  const map = new Map(), deadline = Date.now() + budgetMs;
+  let truncated = false;
+  const add = (el, uses) => map.set(el, Object.assign(map.get(el) || {}, uses));
+  for (const { uses, sel } of groups.values()) {
+    if (Date.now() > deadline) { truncated = true; break }
+    // chunked: a single selector list of thousands of clauses is pathologically slow
+    for (let i = 0; i < sel.length; i += 200) {
+      let els; try { els = document.querySelectorAll(sel.slice(i, i + 200).join(',')) } catch { continue }
+      for (const el of els) add(el, uses);                  // source order approximates the cascade
+    }
+  }
+  for (const el of document.querySelectorAll('[style]')) {
+    const uses = parse(el.getAttribute('style'));
+    if (Object.keys(uses).length) add(el, uses);
+  }
+  map.truncated = truncated;
   return map;
 }
 
@@ -95,16 +113,31 @@ function nameOf(el, cs) {
 // structural fingerprint -- same shape = candidate component
 const hashOf = el => el.tagName.toLowerCase() + '.' + [...el.classList].slice(0, 4).sort().join('.') + '>' + [...el.children].map(c => c.tagName.toLowerCase()).join(',');
 
-// can this element be pixel-isolated by hiding everything else?
-function isolationBlocker(el, cs) {
+// Can this element be pixel-isolated by hiding everything else? Blend modes and
+// ancestor opacity compose with what is behind, so those elements are verified
+// against the composite instead. Inherited down the walk -- never re-walked upward.
+function isolationBlocker(cs, inherited) {
+  if (inherited) return inherited;
   if (cs['mix-blend-mode'] !== 'normal') return 'mix-blend-mode';
   if (cs['backdrop-filter'] !== 'none') return 'backdrop-filter';
-  for (let p = el.parentElement; p; p = p.parentElement) {
-    const pc = getComputedStyle(p);
-    if (pc['mix-blend-mode'] !== 'normal') return 'ancestor blend';
-    if (pc.opacity !== '1') return 'ancestor opacity';
-  }
   return null;
+}
+const passesDown = cs => cs['mix-blend-mode'] !== 'normal' ? 'ancestor blend'
+  : cs.opacity !== '1' ? 'ancestor opacity' : null;
+
+// Most elements are layout wrappers that put no pixels on screen. They need no
+// oracle tile -- and on a real site they are the overwhelming majority of nodes.
+const VISIBLE_BORDER = /^(?!none|hidden)/;
+function paints(n, cs) {
+  if (n.text || n.image || n.svg) return true;
+  const st = n.style;
+  if (st['background-image'] !== 'none') return true;
+  if (!/^rgba\(0, 0, 0, 0\)$|^transparent$/.test(st['background-color'])) return true;
+  if (st['box-shadow'] !== 'none' || st.filter !== 'none' || st['backdrop-filter'] !== 'none') return true;
+  for (const side of ['top', 'right', 'bottom', 'left'])
+    if (parseFloat(st[`border-${side}-width`]) > 0 && VISIBLE_BORDER.test(st[`border-${side}-style`])
+        && !/rgba\(0, 0, 0, 0\)/.test(st[`border-${side}-color`])) return true;
+  return parseFloat(cs.outlineWidth) > 0 && cs.outlineStyle !== 'none';
 }
 
 const SKIP = new Set(['SCRIPT','STYLE','META','LINK','TITLE','HEAD','NOSCRIPT','TEMPLATE','BR']);
@@ -114,7 +147,7 @@ window.__h2f = () => {
   const nodes = [], fonts = [], els = [];
   let paint = 0;
 
-  (function walk(el, parent) {
+  (function walk(el, parent, inherited) {
     if (SKIP.has(el.tagName)) return;
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden') return;
@@ -126,7 +159,7 @@ window.__h2f = () => {
     if (bound) for (const [p, t] of Object.entries(bound)) for (const q of (EXPAND[p] || [p])) if (style[q] && !/^(none|rgba\(0, 0, 0, 0\)|0px)$/.test(style[q])) vars[q] = t;
 
     const n = { id, parent, tag: el.tagName.toLowerCase(), name: nameOf(el, cs), rect, style, vars, paintOrder: paint++, hash: hashOf(el) };
-    const blocker = isolationBlocker(el, cs); if (blocker) n.noIsolate = blocker;
+    const blocker = isolationBlocker(cs, inherited); if (blocker) n.noIsolate = blocker;
 
     const ls = lines(el);
     if (ls.length) n.text = { content: ls.map(l => l.text).join(''), lines: ls };
@@ -137,11 +170,13 @@ window.__h2f = () => {
       if (src) n.image = { src, natural: { w: el.naturalWidth || el.videoWidth || 0, h: el.naturalHeight || el.videoHeight || 0 }, fit: cs['object-fit'], position: cs['object-position'] };
     }
     if (el.tagName === 'CANVAS') { try { n.image = { src: el.toDataURL(), natural: { w: el.width, h: el.height }, fit: 'fill', position: '50% 50%' } } catch {} }
-    if (el.tagName === 'SVG' || el.tagName.toLowerCase() === 'svg') { n.svg = el.outerHTML; nodes.push(n); els[id] = el; return }  // don't descend into svg internals
+    if (el.tagName === 'SVG' || el.tagName.toLowerCase() === 'svg') { n.svg = el.outerHTML; n.paints = true; nodes.push(n); els[id] = el; return }  // don't descend into svg internals
 
+    n.paints = paints(n, cs);
     nodes.push(n); els[id] = el;
-    for (const c of el.children) walk(c, id);
-  })(document.documentElement, null);
+    const down = inherited ?? passesDown(cs);
+    for (const c of el.children) walk(c, id, down);
+  })(document.documentElement, null, null);
 
   window.__h2fEls = els;
   for (const f of document.fonts) fonts.push({ family: f.family, weight: f.weight, style: f.style, src: null });

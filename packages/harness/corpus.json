@@ -1,11 +1,39 @@
 {
-  "sizes": ["L", "M", "S"],
+  "sizes": [
+    "L",
+    "M",
+    "S"
+  ],
   "pages": [
-    { "id": "ikea",    "url": "https://www.ikea.com/us/en/",                 "why": "consent bar, lazy grid, carousels, video hero" },
-    { "id": "nike",    "url": "https://www.nike.com/",                       "why": "region interstitial, scroll reveals, big imagery, webfonts" },
-    { "id": "airbnb",  "url": "https://www.airbnb.com/",                     "why": "cookie modal, map/canvas, sticky search, lazy cards" },
-    { "id": "basic",       "file": "packages/harness/fixtures/basic.html",       "why": "baseline: text wrapping, tokens, flex" },
-    { "id": "adversarial", "file": "packages/harness/fixtures/adversarial.html", "why": "gradients, clip-path, WebP/AVIF, SVG, transforms, columns" },
-    { "id": "hazards",     "file": "packages/harness/fixtures/hazards.html",     "why": "consent + modal, infinite scroll, reveals, lazy, video, sticky" }
+    {
+      "id": "ikea",
+      "url": "https://www.ikea.com/us/en/",
+      "why": "consent bar, lazy grid, carousels, video hero"
+    },
+    {
+      "id": "nike",
+      "url": "https://www.nike.com/",
+      "why": "region interstitial, scroll reveals, big imagery, webfonts"
+    },
+    {
+      "id": "airbnb",
+      "url": "https://www.airbnb.com/",
+      "why": "cookie modal, map/canvas, sticky search, lazy cards"
+    },
+    {
+      "id": "basic",
+      "file": "packages/harness/fixtures/basic.html",
+      "why": "baseline: text wrapping, tokens, flex"
+    },
+    {
+      "id": "adversarial",
+      "file": "packages/harness/fixtures/adversarial.html",
+      "why": "gradients, clip-path, WebP/AVIF, SVG, transforms, columns"
+    },
+    {
+      "id": "hazards",
+      "file": "packages/harness/fixtures/hazards.html",
+      "why": "consent + modal, infinite scroll, reveals, lazy, video, sticky"
+    }
   ]
 }

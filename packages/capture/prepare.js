@@ -46,28 +46,61 @@ function blockers() {
   for (const el of document.querySelectorAll('body *')) {
     const cs = getComputedStyle(el);
     if (cs.position !== 'fixed' || cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity < 0.05) continue;
+    if (+cs.zIndex < 0) continue;                       // behind the page content
+    // A blocker is something that visually covers the page, so the test is whether it
+    // paints -- not whether it takes clicks. An invisible pointer-events:none wrapper
+    // is not a blocker; a translucent scrim with pointer-events:none still is.
+    const opaque = !/^rgba\(0, 0, 0, 0\)$|^transparent$/.test(cs.backgroundColor)
+      || cs.backgroundImage !== 'none' || cs.backdropFilter !== 'none';
+    if (!opaque) continue;
     const r = el.getBoundingClientRect();
+    // skip if positioned outside the viewport
+    if (r.right < 0 || r.bottom < 0 || r.left > vw || r.top > vh) continue;
     if (r.width * r.height > vw * vh * 0.45 && r.top < vh * 0.5) out.push({ tag: el.tagName.toLowerCase(), cls: el.className?.toString().slice(0, 60), area: Math.round(r.width * r.height / (vw * vh) * 100) });
   }
   return out;
 }
 
 // --- lazy content ----------------------------------------------------------------
-async function loadEverything(step = 400, pause = 90) {
-  for (const img of document.images) { img.loading = 'eager'; img.decoding = 'sync'; }
+async function loadEverything({ budgetMs, maxHeight }) {
+  // Deliberately NOT forcing every image eager up front: on a large catalogue page
+  // that decodes hundreds of full-size images at once and kills the renderer.
+  // Scrolling triggers lazy loading a viewport at a time, which is what it is for.
   for (const f of document.querySelectorAll('iframe[loading]')) f.loading = 'eager';
 
-  let last = -1, guard = 0;
-  while (guard++ < 60) {                                   // pages that grow as you scroll
+  const deadline = Date.now() + budgetMs;
+  const step = Math.max(400, innerHeight * 0.8);
+  let last = 0, truncated = null;
+
+  for (let pass = 0; pass < 20 && !truncated; pass++) {
     const H = document.documentElement.scrollHeight;
-    for (let y = Math.max(0, last); y < H; y += step) { scrollTo(0, y); await sleep(pause) }
-    if (document.documentElement.scrollHeight === H) break;
-    last = H - step;
+    for (let y = last; y < H; y += step) {
+      scrollTo(0, y);
+      await sleep(70);
+      if (Date.now() > deadline) { truncated = 'time'; break }
+      if (y > maxHeight) { truncated = 'height'; break }
+    }
+    if (truncated || document.documentElement.scrollHeight === H) break;   // stopped growing
+    last = Math.max(0, H - step);
   }
+
   scrollTo(0, 0);
-  await sleep(200);
+  await sleep(250);
   await document.fonts?.ready;
-  await Promise.all([...document.images].map(i => i.decode?.().catch(() => {})));
+
+  // Whatever lazy loading missed, fetch in small batches so peak memory stays bounded.
+  const pending = [...document.images].filter(i => !i.complete || !i.naturalWidth).slice(0, 300);
+  for (let i = 0; i < pending.length; i += 12) {
+    if (Date.now() > deadline + 8000) { truncated ??= 'time'; break }
+    await Promise.all(pending.slice(i, i + 12).map(img => new Promise(r => {
+      img.loading = 'eager';
+      if (img.complete) return r();
+      img.addEventListener('load', r, { once: true });
+      img.addEventListener('error', r, { once: true });
+      setTimeout(r, 2500);
+    })));
+  }
+  return truncated;
 }
 
 // --- animation and media -----------------------------------------------------------
@@ -106,14 +139,15 @@ function dismissBlockers() {
   return clicked;
 }
 
-window.__h2fPrepare = async () => {
+window.__h2fPrepare = async (opts = {}) => {
+  const { budgetMs = 25000, maxHeight = 30000 } = opts;
   const dismissed = dismiss();
   await sleep(400);
   const again = [...dismiss(), ...dismissBlockers()];      // some banners appear only after the first is gone
-  await loadEverything();
+  const truncated = await loadEverything({ budgetMs, maxHeight });
   settleAnimations();
   const videos = freezeMedia();
   await sleep(150);
-  return { dismissed: [...dismissed, ...again], blockers: blockers(), videos };
+  return { dismissed: [...dismissed, ...again], blockers: blockers(), videos, truncated };
 };
 })();

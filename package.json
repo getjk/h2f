@@ -4,14 +4,16 @@
   "private": true,
   "scripts": {
     "capture": "tsx bin/capture.ts",
-    "compare": "tsx bin/compare.ts"
+    "setup": "playwright install chromium",
+    "gate": "tsx bin/gate.ts",
+    "verify": "tsx bin/verify.ts"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",
     "tsx": "^4.23.13"
   },
   "dependencies": {
-    "playwright-core": "^1.56.0",
+    "playwright": "^1.56.0",
     "sharp": "^0.34.0"
   }
 }

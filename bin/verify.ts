@@ -29,8 +29,23 @@ const rebuilt = await sharp({ create: { width, height, channels: 4, background: 
   .composite(layers).png().toBuffer();
 
 writeFileSync(join(dir, 'rebuilt.png'), rebuilt);
+
+// side-by-side, downscaled: the one file worth sending when something looks wrong
+const w = Math.min(900, width);
+const [l, r] = await Promise.all([sharp(oracle.full).resize(w).toBuffer(), sharp(rebuilt).resize(w).toBuffer()]);
+const h = (await sharp(l).metadata()).height ?? 0;
+await sharp({ create: { width: w * 2 + 12, height: h, channels: 4, background: '#e11d48' } })
+  .composite([{ input: l, left: 0, top: 0 }, { input: r, left: w + 12, top: 0 }])
+  .png().toFile(join(dir, 'compare.png'));
+
 const m = await compare(oracle.full, rebuilt);
 const hot = m.heat.flatMap((row, y) => row.map((v, x) => ({ v, x, y }))).sort((a, b) => b.v - a.v).slice(0, 3);
 console.log(`${dir}  ${layers.length} tiles -> ${m.width}x${m.height}`);
 console.log(`  meanΔE ${m.meanDeltaE}   p95ΔE ${m.p95DeltaE}   SSIM ${m.ssim}`);
-console.log(`  hottest cells: ${hot.map(h => `(${h.x},${h.y})=${h.v}`).join('  ')}`);
+console.log(`  hottest cells: ${hot.map(c => `(${c.x},${c.y})=${c.v}`).join('  ')}`);
+console.log(`  left=Chrome right=rebuilt -> ${join(dir, 'compare.png')}`);
+if (ir.prepared) {
+  const p = ir.prepared;
+  if (p.dismissed.length) console.log(`  dismissed: ${p.dismissed.join(' | ')}`);
+  if (p.blockers.length) console.log(`  STILL BLOCKING: ${p.blockers.map(b => `${b.tag}.${b.cls} (${b.area}% of viewport)`).join(' | ')}`);
+}

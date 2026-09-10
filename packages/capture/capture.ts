@@ -1,4 +1,4 @@
-import { chromium, type Page, type CDPSession } from 'playwright-core';
+import { chromium, type Page, type CDPSession } from 'playwright';
 import sharp from 'sharp';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -71,22 +71,36 @@ async function shotRegion(page: Page, cdp: CDPSession, rect: Rect, dpr: number, 
     });
     const img = Buffer.from(data, 'base64');
     const meta = await sharp(img).metadata();
+    const imgW = meta.width ?? 0, imgH = meta.height ?? 0;
+    if (imgW === 0 || imgH === 0) continue;
     // page space -> this strip's image space
     const left = Math.round(rect.x * dpr), top = Math.round((y - at) * dpr);
-    if (top >= (meta.height ?? 0)) continue;
-    const w = clamp(W, 1, (meta.width ?? 0) - left), h = clamp(Math.round(Math.min(vh, rect.y + rect.h - y) * dpr), 1, (meta.height ?? 0) - top);
-    parts.push({ input: await sharp(img).extract({ left: clamp(left, 0, (meta.width ?? 1) - 1), top: clamp(top, 0, (meta.height ?? 1) - 1), width: w, height: h }).png().toBuffer(), left: 0, top: Math.round((y - rect.y) * dpr) });
+    // skip if the extract region is completely outside the screenshot
+    if (left >= imgW || top >= imgH || left + W <= 0 || top + Math.round(Math.min(vh, rect.y + rect.h - y) * dpr) <= 0) continue;
+    // compute the intersection between the wanted rect and what the screenshot contains
+    const clipLeft = Math.max(0, left), clipTop = Math.max(0, top);
+    const clipRight = Math.min(imgW, left + W), clipBottom = Math.min(imgH, top + Math.round(Math.min(vh, rect.y + rect.h - y) * dpr));
+    const w = clipRight - clipLeft, h = clipBottom - clipTop;
+    if (w <= 0 || h <= 0) continue;
+    parts.push({ input: await sharp(img).extract({ left: clipLeft, top: clipTop, width: w, height: h }).png().toBuffer(), left: clipLeft - left, top: Math.round((y - rect.y) * dpr) + (clipTop - top) });
   }
   return sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite(parts).png().toBuffer();
 }
 
 export async function capture(url: string, size: CaptureSize, outDir: string) {
+  const t0 = Date.now(); const phase: Record<string, number> = {};
+  const mark = (name: string) => { phase[name] = Math.round((Date.now() - t0) / 100) / 10 };
   const s = SIZES[size];
   mkdirSync(outDir, { recursive: true });
   const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
   const browser = await chromium.launch({
-    executablePath: process.env.CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-    args: ['--no-sandbox', '--font-render-hinting=none', '--disable-lcd-text'],
+    // CHROMIUM overrides; otherwise Playwright uses the browser it installed
+    ...(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {}),
+    args: ['--no-sandbox', '--font-render-hinting=none', '--disable-lcd-text',
+      // Some corporate TLS-terminating proxies reset Chromium's TLS 1.3 handshake
+      // while curl and Node succeed. Capping the version still verifies certificates
+      // and does not change how a page renders. Opt-in; never on by default.
+      ...(process.env.H2F_TLS12 ? ['--ssl-version-max=tls1.2'] : [])],
     ...(proxy ? { proxy: { server: proxy } } : {}),
   });
   const ctx = await browser.newContext({
@@ -111,11 +125,25 @@ export async function capture(url: string, size: CaptureSize, outDir: string) {
     }, { once: true });
   });
 
+  // A hard wall clock: one slow site must not stall a corpus run. Closing the browser
+  // rejects whatever CDP call is outstanding, so this escapes hangs anywhere below.
+  const wall = +(process.env.H2F_TIMEOUT_MS ?? 240_000);
+  const bomb = setTimeout(() => { browser.close().catch(() => {}) }, wall);
+
   await page.goto(url, { waitUntil: 'load', timeout: 60_000 });
   await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {});
+  mark('load');
   await page.addStyleTag({ content: FREEZE });
-  const prep = await page.evaluate(PREPARE + '; window.__h2fPrepare()') as StructureIR['prepared'];
+  const budget = +(process.env.H2F_BUDGET_MS ?? 25000), maxHeight = +(process.env.H2F_MAX_HEIGHT ?? 30000);
+  // If preparation dies (a renderer OOM on a heavy page), capture what the page has
+  // rather than losing it entirely -- and say in the report that it was not prepared.
+  const blank: StructureIR['prepared'] = { dismissed: [], blockers: [], videos: [], truncated: null };
+  const prep = await page.evaluate(PREPARE + `; window.__h2fPrepare({budgetMs:${budget},maxHeight:${maxHeight}})`)
+    .then(r => r as StructureIR['prepared'])
+    .catch((e: Error) => ({ ...blank, failed: e.message.split('\n')[0] }));
+  if (page.isClosed()) throw new Error('renderer died during preparation');
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {});
+  mark('prepare');
   await page.addStyleTag({ content: PINNED });
   await page.evaluate(() => {
     for (const el of document.querySelectorAll('*')) {
@@ -131,22 +159,35 @@ export async function capture(url: string, size: CaptureSize, outDir: string) {
   injectedViewportMeta = await page.evaluate(() => !!(window as any).__h2fInjectedViewport);
 
   const raw = await page.evaluate(INPAGE + '; window.__h2f()') as any;
+  mark('collect');
   const ir: StructureIR = { ...raw, size, viewport: { w: s.w, h: s.h, dpr: s.dpr }, layout: lay, injectedViewportMeta, prepared: prep };
 
   // reference: the whole page as Chrome draws it
-  const full = { x: 0, y: 0, w: ir.page.w, h: Math.min(ir.page.h, 30_000) };
+  const overflowX = Math.max(0, ir.page.w - lay.w);
+  const full = { x: 0, y: 0, w: Math.min(ir.page.w, lay.w), h: Math.min(ir.page.h, 30_000) };
   writeFileSync(join(outDir, 'full.png'), await shotRegion(page, cdp, full, s.dpr, lay.w, lay.h));
+  mark('reference');
 
   // oracle: each element alone, transparent, in page coordinates
   await cdp.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
   await page.addStyleTag({ content: ISOLATE });
 
-  const targets = ir.nodes.filter(n => !n.noIsolate && n.rect.w >= 1 && n.rect.h >= 1 && n.rect.w * n.rect.h < 12e6);
+  const maxTiles = +(process.env.H2F_MAX_TILES ?? 2000);
+  // Nodes starting beyond the layout viewport (carousel items scrolled off to the
+  // right) can never be photographed, so they are counted, not silently blank.
+  const reachable = ir.nodes.filter(n => n.paints && !n.noIsolate && n.rect.w >= 1 && n.rect.h >= 1 && n.rect.w * n.rect.h < 12e6);
+  const offscreen = reachable.filter(n => n.rect.x >= lay.w).length;
+  const all = reachable.filter(n => n.rect.x < lay.w);
+  // Biggest first, so a cap drops the least visible things rather than an arbitrary tail.
+  const targets = all.length <= maxTiles ? all
+    : [...all].sort((a, b) => b.rect.w * b.rect.h - a.rect.w * a.rect.h).slice(0, maxTiles);
   const tiles: Record<number, string> = {};
   const batches = pack(targets, lay.h);
   mkdirSync(join(outDir, 'tiles'), { recursive: true });
 
+  let done = 0;
   for (const batch of batches) {
+    if (process.stderr.isTTY || process.env.H2F_PROGRESS) process.stderr.write(`\r  tiles ${done}/${targets.length} (batch ${++done && batches.indexOf(batch) + 1}/${batches.length})   `);
     await page.evaluate(ids => {
       document.querySelectorAll('[data-h2f]').forEach(e => e.removeAttribute('data-h2f'));
       const all = (window as any).__h2fEls as Element[];
@@ -167,11 +208,14 @@ export async function capture(url: string, size: CaptureSize, outDir: string) {
       await img.clone().extract({ left, top, width, height }).toFile(p);
       tiles[n.id] = p;
     }));
+    done += batch.length - 1;
   }
 
-  const oracle: Oracle = { size, full: join(outDir, 'full.png'), tiles };
+  mark('oracle');
+  clearTimeout(bomb);
+  const oracle: Oracle = { size, full: join(outDir, 'full.png'), tiles, skipped: all.length - targets.length, offscreenX: offscreen, overflowX };
   writeFileSync(join(outDir, 'structure.json'), JSON.stringify(ir));
   writeFileSync(join(outDir, 'oracle.json'), JSON.stringify(oracle));
   await browser.close();
-  return { ir, oracle, batches: batches.length };
+  return { ir, oracle, batches: batches.length, phase };
 }

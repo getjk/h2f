@@ -117,9 +117,14 @@ expands shorthands itself, so a binding means the author really wrote the token.
 - **The Figma plugin.** The verification loop has to live there — only the plugin can
   `exportAsync`. Its UI is built with Base UI components.
 - **Calibration.** The transfer-function fitting rig (cheap-agent grunt work).
-- **Real sites.** Chromium cannot tunnel through this sandbox's egress proxy
-  (`curl` can; the relay drops the browser's tunnels), so validation so far is on
-  local fixtures — the hazards fixture exists precisely because IKEA, Nike and
-  Airbnb were unreachable from here. This runs fine on any normal machine; the
-  first job on real hardware is `npx tsx bin/gate.ts L ikea,nike,airbnb`.
+- **Real sites.** Still unvalidated. In Claude's sandbox the egress relay resets
+  Chromium's TLS 1.3 handshake (curl and Node succeed through the same proxy);
+  `H2F_TLS12=1` gets past that, and pages then load — but real pages are large enough
+  that they exposed two scaling bugs in the collector, both now fixed: `varBindings`
+  ran one `querySelectorAll` per CSS rule (now grouped by binding set and chunked),
+  and `isolationBlocker` re-walked every ancestor calling `getComputedStyle` (now
+  inherited down the walk). The scroll pass also gained a time and height budget so
+  an infinite feed terminates and says it was truncated. None of this is validated
+  against IKEA/Nike/Airbnb yet — that is the first job on real hardware:
+  `npm run gate -- L ikea,nike,airbnb`.
 - **Asset extraction** (image bytes, font files) and the server.
